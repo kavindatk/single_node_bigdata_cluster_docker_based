@@ -409,59 +409,320 @@ Then add/modify following
 
 🔴 🔴 🔴 Goto line 3224 and remove non-unicode character , this cause the unicode error 🔴 🔴 🔴 
 
+#### Create required HDFS folders and set permission
+
+```hdfs
+hdfs dfs -ls /
+hdfs dfs -rm -r /user
+hdfs dfs -ls /
+hdfs dfs -mkdir -p /user/hive/warehouse
+
+hdfs dfs -chmod g+w /user
+hdfs dfs -chmod g+wx /user
+
+hdfs dfs -chmod g+w /tmp
+hdfs dfs -chmod g+wx /tmp
+```
+#### Hive Configurations (hive-env.sh)
+
+```bash
+cp hive-env.sh.template hive-env.sh
+
+nano hive-env.sh
+```
+
+Then add/modify following 
+
+```xml
+HADOOP_HOME=/opt/hadoop
+```
+#### Remove conflicting libraries 
+
+```bash
+cd $HIVE_HOME/lib/
+
+rm -rf rm -rf guava-22.0.jar 
+
+cp $HADOOP_HOME/share/hadoop/common/lib/guava-27.0-jre.jar $HIVE_HOME/lib/
+```
+
+#### Hive verification - Using Apache Derby Metastore
+
+```bash
+cd $HIVE_HOME/scripts/metastore/upgrade/derby/
+
+nano hive-schema-3.1.0.derby.sql 
+```
+
+Then add/modify following (Comment)
+
+```sql
+--CREATE FUNCTION "APP"."NUCLEUS_ASCII" (C CHAR(1)) RETURNS INTEGER LANGUAGE JAVA PARAMETER STYLE JAVA READS SQL DATA CALLED ON NULL INPUT EXTERNAL NAME 'org.datan>
+
+--CREATE FUNCTION "APP"."NUCLEUS_MATCHES" (TEXT VARCHAR(8000),PATTERN VARCHAR(8000)) RETURNS INTEGER LANGUAGE JAVA PARAMETER STYLE JAVA READS SQL DATA CALLED ON NU>
+
+```
+
+```bash
+#Hive build Derby metastore
+cd $HIVE_HOME/bin
+schematool -dbType derby -initSchema
+```
+
+#### Hive Testing
+
+```hive
+#Check Hive
+hive
+#or
+beeline -u "jdbc:hive2://"
+
+#create random data and uploaded to HDFS for Hive data loading
+cd /home/hadoop
+seq 1 10000000 > numbers.txt
+hdfs dfs -mkdir /user/hive/warehouse/sample/
+hdfs dfs -put numbers.txt /user/hive/warehouse/sample/
+
+#create table and load HDFS data
+beeline -u "jdbc:hive2://"
+
+create database sample_data;
+use sample_data;
+
+CREATE  TABLE sample_data.number_data (
+val_col bigint
+)row format delimited fields terminated by ',' 
+location '/user/hive/warehouse/sample/';
+
+
+#testing status
+select sum(val_col) from sample_data.number_data;
+```
+
+Fixing slf4j Log binding warnings 
+
+```bash
+#Fix slf4j Log binding
+find /opt/hadoop /opt/tez -name "slf4j-reload4j-*.jar"
+rm /opt/tez/lib/slf4j-reload4j-1.7.36.jar
+rm -rf /opt/hive/lib/log4j-slf4j-impl-2.18.0.jar
+sudo ln -s /opt/hadoop/share/hadoop/common/lib/slf4j-reload4j-1.7.36.jar /opt/tez/lib/slf4j-reload4j-1.7.36.jar
+sudo ln -s /opt/hadoop/share/hadoop/common/lib/slf4j-reload4j-1.7.36.jar /opt/hive/lib/slf4j-reload4j-1.7.36.jar
+
+```
+
 
 ## TEZ Configurations
 
 #### Adding System variables 
 
 ```ssh
-nano ~/.bashrc
+nano ~/.bashrc 
 
-#Hadoop Related Options
-export HADOOP_HOME=/opt/hadoop
-export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-export HADOOP_INSTALL=$HADOOP_HOME
-export HADOOP_MAPRED_HOME=$HADOOP_HOME
-export HADOOP_COMMON_HOME=$HADOOP_HOME
-export HADOOP_HDFS_HOME=$HADOOP_HOME
-export HADOOP_YARN_HOME=$HADOOP_HOME
-export HADOOP_COMMON_LIB_NATIVE_DIR=$HADOOP_HOME/lib/native
-export PATH=$PATH:$HADOOP_HOME/sbin:$HADOOP_HOME/bin:$JAVA_HOME/bin
-export HADOOP_OPTS="-Djava.library.path=$HADOOP_HOME/lib/native"
 
+#Tez Related Options
+export TEZ_HOME=/opt/tez
+export TEZ_CONF_DIR=$TEZ_HOME/conf
+
+export TEZ_JARS=$TEZ_HOME
+# For enabling hive to use the Tez engine
+if [ -z "$HIVE_AUX_JARS_PATH" ]; then
+export HIVE_AUX_JARS_PATH="$TEZ_JARS"
+else
+export HIVE_AUX_JARS_PATH="$HIVE_AUX_JARS_PATH:$TEZ_JARS"
+fi
+
+
+export HADOOP_CLASSPATH=${TEZ_CONF_DIR}:${TEZ_JARS}/*:${TEZ_JARS}/lib/*
 
 source ~/.bashrc
 
 ```
+
+#### Create required HDFS folders and upload TEZ
+
+```bash
+hdfs dfs -mkdir /apps
+hdfs dfs -mkdir /apps/tez
+hdfs dfs -chmod g+w /apps
+hdfs dfs -chmod g+wx /apps
+
+cp $HIVE_HOME/lib/protobuf-java-3.24.4.jar $TEZ_HOME/lib/
+hdfs dfs -put $HIVE_HOME/lib/hive-exec-4.0.0.jar /apps/tez
+cd $TEZ_HOME 
+hdfs dfs -put * /apps/tez
+```
+
+#### TEZ Configurations (tez-site.xml)
+
+```bash
+cd $TEZ_HOME/conf/
+
+nano tez-site.xml 
+```
+
+Then add/modify following 
+
+```xml
+<?xml version="1.0"?>
+<configuration>
+
+  <property>
+    <name>tez.lib.uris</name>
+    <value>${fs.default.name}/apps/tez/share/tez.tar.gz</value>
+  </property>
+
+</configuration>
+```
+
+#### Hive Configurations - Change execution engine (hive-site.xml)
+
+```bash
+nano $HIVE_HOME/conf/hive-site.xml 
+```
+
+Then add/modify following 
+
+```xml
+  <property>
+    <name>hive.execution.engine</name>
+    <value>tez</value>
+    <description>
+      Expects one of [mr, tez, spark].
+      Chooses execution engine. Options are: mr (Map reduce, default), tez, spark. While>
+      remains the default engine for historical reasons, it is itself a historical engine
+      and is deprecated in Hive 2 line. It may be removed without further warning.
+    </description>
+  </property>
+
+```
+
+## Change Apache Derby Metastore to MySQL Metastore
+
+```bash
+#Remove existing metastore 
+cd $HIVE_HOME/bin
+rm -rf  metastore_db
+```
+
+```bash
+# Download MYSQL JDBC Connectorand move to Hive Libs
+wget https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-java-8.0.30.tar.gz 
+tar -xzvf mysql-connector-java-8.0.30.tar.gz
+
+sudo cp mysql-connector-java-8.0.30.jar $HIVE_HOME/lib/
+```
+
+#### Hive Configurations - Change metastore (hive-site.xml)
+
+```bash
+nano $HIVE_HOME/conf/hive-site.xml 
+```
+
+Then add/modify following 
+
+```xml
+    <property>
+        <name>javax.jdo.option.ConnectionURL</name>
+        <value>jdbc:mysql://localhost:3306/metastore?useSSL=false</value>
+    </property>
+    <property>
+        <name>javax.jdo.option.ConnectionDriverName</name>
+        <value>com.mysql.cj.jdbc.Driver</value>
+    </property>
+    <property>
+        <name>javax.jdo.option.ConnectionUserName</name>
+        <value>hive</value>
+    </property>
+    <property>
+        <name>javax.jdo.option.ConnectionPassword</name>
+        <value>your_strong_password</value>
+    </property>
+    
+    <!-- Metastore Configuration -->
+    <property>
+        <name>hive.metastore.db.type</name>
+        <value>mysql</value>
+    </property>
+    <property>
+        <name>hive.metastore.warehouse.dir</name>
+        <value>/user/hive/warehouse</value>
+    </property>
+```
+
+```bash
+# Regenrate Metastore
+
+cd $HIVE_HOME/bin
+
+schematool -initSchema -dbType mysql
+
+```
+
+```sql
+# Verification
+
+hadoop@7454095b6ca0:~$ beeline -u "jdbc:hive2://"
+Connecting to jdbc:hive2://
+Hive Session ID = 7c61ca30-bb38-456d-b8b9-aeefc78e837d
+WARNING: An illegal reflective access operation has occurred
+WARNING: Illegal reflective access by org.apache.hadoop.hive.common.StringInternUtils (file:/opt/hive/lib/hive-common-4.0.0.jar) to field java.net.URI.string
+WARNING: Please consider reporting this to the maintainers of org.apache.hadoop.hive.common.StringInternUtils
+WARNING: Use --illegal-access=warn to enable warnings of further illegal reflective access operations
+WARNING: All illegal access operations will be denied in a future release
+Connected to: Apache Hive (version 4.0.0)
+Driver: Hive JDBC (version 4.0.0)
+Transaction isolation: TRANSACTION_REPEATABLE_READ
+Beeline version 4.0.0 by Apache Hive
+0: jdbc:hive2://> 
+0: jdbc:hive2://> 
+0: jdbc:hive2://> set hive.execution.engine;
++----------------------------+
+|            set             |
++----------------------------+
+| hive.execution.engine=tez  |
++----------------------------+
+1 row selected (0.026 seconds)
+0: jdbc:hive2://> 
+0: jdbc:hive2://> 
+```
+
 
 ## SPARK Configurations
 
 #### Adding System variables 
 
 ```ssh
-nano ~/.bashrc
+nano ~/.bashrc 
 
-#Hadoop Related Options
-export HADOOP_HOME=/opt/hadoop
-export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-export HADOOP_INSTALL=$HADOOP_HOME
-export HADOOP_MAPRED_HOME=$HADOOP_HOME
-export HADOOP_COMMON_HOME=$HADOOP_HOME
-export HADOOP_HDFS_HOME=$HADOOP_HOME
-export HADOOP_YARN_HOME=$HADOOP_HOME
-export HADOOP_COMMON_LIB_NATIVE_DIR=$HADOOP_HOME/lib/native
-export PATH=$PATH:$HADOOP_HOME/sbin:$HADOOP_HOME/bin:$JAVA_HOME/bin
-export HADOOP_OPTS="-Djava.library.path=$HADOOP_HOME/lib/native"
+#Spark Related Options
+export SPARK_HOME=/opt/spark
+export PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
+export PYSPARK_PYTHON=/usr/bin/python3
+export LD_LIBRARY_PATH=$HADOOP_HOME/lib/native:$LD_LIBRARY_PATH
 
-
-source ~/.bashrc
+source ~/.bashrc 
 
 ```
 
+```bash
+#Set Log4j properties
+nano $SPARK_HOME/conf/log4j2.properties
+logger.HiveConf.name=org.apache.hadoop.hive.conf.HiveConf
+logger.HiveConf.level=ERROR
 
+#Coping MySQL connector
+sudo cp /home/hadoop/mysql-connector-java-8.0.30.jar $SPARK_HOME/jars/
+```
 
+```bash
+#Testing
+start-master.sh
+start-worker.sh spark://localhost:7077
 
-
+netstat -tuln | grep 7077
+netstat -tuln | grep 8080
+```
 
 
 
