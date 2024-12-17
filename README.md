@@ -39,7 +39,7 @@ To build the Big Data Docker image, I used the latest Ubuntu stock image and ins
 1. SSH
 2. OpenJDK
 3. Editor
-4. Some additional tools (Netowrk tools, MySQL..etc)
+4. Some additional tools (Network tools, MySQL..etc)
     
 Here are the steps I followed:
 
@@ -142,7 +142,7 @@ Versions Used:
     Spark: 3.5.3
 
 
-[Docke File Link](https://github.com/kavindatk/single_node_bigdata_cluster_docker_based/blob/main/Dockerfile)
+[Docker File Link](https://github.com/kavindatk/single_node_bigdata_cluster_docker_based/blob/main/Dockerfile)
 
 
 ## Docker Build and Configure Node
@@ -153,7 +153,7 @@ Docker Build Image :
 docker build -t <image name> .
 ```
 
-Docker Login to image (Create containner and launch configurations):
+Docker Login to image (Create container and launch configurations):
 
 ```docker
 docker run -it --name <custom-container-name> -p host_port:container_port <image name>
@@ -606,7 +606,7 @@ rm -rf  metastore_db
 ```
 
 ```bash
-# Download MYSQL JDBC Connectorand move to Hive Libs
+# Download MYSQL JDBC Connector and move to Hive Libs
 wget https://dev.mysql.com/get/Downloads/Connector-J/mysql-connector-java-8.0.30.tar.gz 
 tar -xzvf mysql-connector-java-8.0.30.tar.gz
 
@@ -651,7 +651,7 @@ Then add/modify following
 ```
 
 ```bash
-# Regenrate Metastore
+# Regenerate Metastore
 
 cd $HIVE_HOME/bin
 
